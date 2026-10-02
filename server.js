@@ -33,6 +33,7 @@ app.get('/api/extract', async (req, res) => {
     });
     
     const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 720 });
     // Ajout d'un faux User-Agent pour améliorer la furtivité
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     
