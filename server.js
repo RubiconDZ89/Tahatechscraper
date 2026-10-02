@@ -10,9 +10,7 @@ app.use(cors());
 app.get('/api/extract', async (req, res) => {
   const { id, type = 'movie', season = 1, episode = 1 } = req.query;
 
-  if (!id) {
-    return res.status(400).json({ error: "ID manquant." });
-  }
+  if (!id) return res.status(400).json({ error: "ID manquant." });
 
   const sources = [
     `https://embed.su/embed/${type}/${id}${type === 'tv' ? `/${season}/${episode}` : ''}`,
@@ -35,6 +33,9 @@ app.get('/api/extract', async (req, res) => {
     });
     
     const page = await browser.newPage();
+    // Ajout d'un faux User-Agent pour améliorer la furtivité
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    
     let videoLink = null;
 
     page.on('response', async (response) => {
@@ -45,13 +46,14 @@ app.get('/api/extract', async (req, res) => {
     });
 
     for (const url of sources) {
-      console.log(`Test source : ${url}`);
+      console.log(`[Test Source] : ${url}`);
       try {
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+        // Changement de 'networkidle2' à 'domcontentloaded' pour éviter les blocages liés aux scripts de pub infinis
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
         await page.mouse.click(page.viewport().width / 2, page.viewport().height / 2);
-        await new Promise(r => setTimeout(r, 3000));
+        await new Promise(r => setTimeout(r, 4000));
       } catch (e) {
-        console.log(`Source échouée, passage à la suivante.`);
+        console.log(`[Échec de la source] Raison : ${e.message}`);
       }
 
       if (videoLink) break;
@@ -65,7 +67,7 @@ app.get('/api/extract', async (req, res) => {
       res.status(404).json({ error: "Aucun flux compatible trouvé." });
     }
   } catch (error) {
-    console.error(`Erreur système : ${error.message}`);
+    console.error(`[Erreur système] : ${error.message}`);
     res.status(500).json({ error: "Erreur critique du serveur." });
   }
 });
