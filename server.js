@@ -47,7 +47,7 @@ app.get('/api/extract', async (req, res) => {
     for (const url of sources) {
       console.log(`Test source : ${url}`);
       try {
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 15000 });
+        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
         await page.mouse.click(page.viewport().width / 2, page.viewport().height / 2);
         await new Promise(r => setTimeout(r, 3000));
       } catch (e) {
