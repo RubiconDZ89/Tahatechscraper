@@ -1,77 +1,64 @@
 const express = require('express');
 const cors = require('cors');
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-puppeteer.use(StealthPlugin());
 
 const app = express();
 app.use(cors());
 
 app.get('/api/extract', async (req, res) => {
   const { id, type = 'movie', season = 1, episode = 1 } = req.query;
-
+  
   if (!id) return res.status(400).json({ error: "ID manquant." });
 
+  const API_KEY = process.env.SCRAPER_API_KEY;
+  if (!API_KEY) {
+    return res.status(500).json({ error: "Configuration serveur incomplète : clé ScraperAPI manquante." });
+  }
+
+  // Liste allégée des sources à tester
   const sources = [
     `https://embed.su/embed/${type}/${id}${type === 'tv' ? `/${season}/${episode}` : ''}`,
-    `https://vidsrc.me/embed/${type}?tmdb=${id}${type === 'tv' ? `&season=${season}&ep=${episode}` : ''}`,
-    `https://vidlink.pro/${type === 'tv' ? 'tv' : 'movie'}/${id}${type === 'tv' ? `/${season}/${episode}` : ''}`,
-    `https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1${type === 'tv' ? `&s=${season}&e=${episode}` : ''}`
+    `https://vidsrc.me/embed/${type}?tmdb=${id}${type === 'tv' ? `&season=${season}&ep=${episode}` : ''}`
   ];
 
-  try {
-    const browser = await puppeteer.launch({
-      headless: "new",
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--disable-gpu',
-        '--single-process'
-      ]
-    });
+  let videoLink = null;
+
+  for (const targetUrl of sources) {
+    console.log(`[ScraperAPI] Interrogation de : ${targetUrl}`);
     
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 720 });
-    // Ajout d'un faux User-Agent pour améliorer la furtivité
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    
-    let videoLink = null;
+    // Requête vers ScraperAPI avec rendu JavaScript activé pour contourner Cloudflare
+    const scraperApiUrl = `http://api.scraperapi.com?api_key=${API_KEY}&url=${encodeURIComponent(targetUrl)}&render=true`;
 
-    page.on('response', async (response) => {
-      const url = response.url();
-      if (url.includes('.mp4') || url.includes('.m3u8')) {
-        videoLink = url;
+    try {
+      const response = await fetch(scraperApiUrl);
+      const html = await response.text();
+
+      // Recherche Regex universelle pour trouver les flux médias dans le code source de la page
+      const regex = /(https?:\/\/[a-zA-Z0-9.\-_~:/?#\[\]@!$&'()*+,;=]+?\.(?:mp4|m3u8)[a-zA-Z0-9.\-_~:/?#\[\]@!$&'()*+,;=]*)/gi;
+      const matches = html.match(regex);
+
+      if (matches && matches.length > 0) {
+        // Filtrage de base pour exclure les fausses URL (scripts de pub, vidéos vides)
+        const validLink = matches.find(link => !link.includes('adserver') && !link.includes('blank'));
+        
+        if (validLink) {
+          console.log(`[Succès] Flux vidéo capturé !`);
+          videoLink = validLink;
+          break; // Arrête la recherche dès qu'un lien est trouvé
+        }
+      } else {
+        console.log(`[Échec] Le contournement a fonctionné, mais aucun lien direct .mp4/.m3u8 n'est exposé dans le HTML.`);
       }
-    });
-
-    for (const url of sources) {
-      console.log(`[Test Source] : ${url}`);
-      try {
-        // Changement de 'networkidle2' à 'domcontentloaded' pour éviter les blocages liés aux scripts de pub infinis
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        await page.mouse.click(page.viewport().width / 2, page.viewport().height / 2);
-        await new Promise(r => setTimeout(r, 4000));
-      } catch (e) {
-        console.log(`[Échec de la source] Raison : ${e.message}`);
-      }
-
-      if (videoLink) break;
+    } catch (error) {
+      console.error(`[Erreur réseau] Échec de la communication avec l'API : ${error.message}`);
     }
+  }
 
-    await browser.close();
-
-    if (videoLink) {
-      res.json({ source: videoLink });
-    } else {
-      res.status(404).json({ error: "Aucun flux compatible trouvé." });
-    }
-  } catch (error) {
-    console.error(`[Erreur système] : ${error.message}`);
-    res.status(500).json({ error: "Erreur critique du serveur." });
+  if (videoLink) {
+    res.json({ source: videoLink });
+  } else {
+    res.status(404).json({ error: "Aucun flux compatible trouvé par le système d'extraction." });
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Scraper démarré sur le port ${PORT}`));
+app.listen(PORT, () => console.log(`Serveur d'extraction via API démarré sur le port ${PORT}`));
